@@ -209,9 +209,9 @@ int i = 0;
 while (1) {
 
     // get command
-    strcpy(strcmd, getcmd());                // get command with greeting
+    strcmd = getcmd();                // get command with greeting
     if (strcmd == NULL) continue;  // if it's empty, ask for command again
-    history[history_count++] = strcmd;      // save command in history
+    history[history_count++] = strdup(strcmd);      // save command in history
 
     // split command into tokens
     token = strtok(strcmd, " ");            // split command into tokens
@@ -246,7 +246,7 @@ while (1) {
 		if (setenv(cmd[1], cmd[2], 1) != 0) { perror("setenv"); }
 
 // --- ELSE ---
-    } else { system(strcmd); }
+    } else { system(history[history_count - 1]); }
 ret_if_not_fir_col(); } free(strcmd); return 0; }
 
 // ==================== MAIN =============================================================================
