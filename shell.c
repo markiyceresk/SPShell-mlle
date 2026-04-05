@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <fcntl.h>
 
 #ifdef _WIN32                                                                                                                                                   // if it's slopos, show error
     #error "WOOP!!! WOOP!!! Microslop detected! This software is for Unix-based systems only. You must install Linux NOW!!! https://www.linux.org/pages/download/ !!!"          // ^ It's fully true
@@ -202,19 +203,45 @@ void greeting() {
 
 int main() {
 greeting();
-char *strcmd;
-char *token;
-char *cmd[255];
-int i = 0;
+FILE *file;
+char *strcmd, *token, *strsplcmd, *elsecmd, strfile[256];
+char *cmd[255], *splcmd[255];
+int i, j, k, o_k, reded, old_out, fd;
 while (1) {
 
     // get command
     strcmd = getcmd();                // get command with greeting
-    if (strcmd == NULL) continue;  // if it's empty, ask for command again
+    if (strcmd == NULL) continue;     // if it's empty, ask for command again
     history[history_count++] = strdup(strcmd);      // save command in history
 
+    // ------------------------------
+    // split command into subcommands
+    // ------------------------------
+
+    token = strtok(strcmd, ";");
+    i = 0;
+    while (token != NULL && i < 255) {
+        splcmd[i++] = token;
+        token = strtok(NULL, ";");
+    }
+    splcmd[i] = NULL;                       // null-terminate the command array
+
+    // -------------------
+    // execute subcommands
+    // -------------------
+
+    j = 0;
+    i = 0;
+    reded = 0;
+
+    while (splcmd[j] != NULL) {
+        reded = 0;
+
+    strsplcmd = splcmd[j];
+    elsecmd = strdup(strsplcmd);
+
     // split command into tokens
-    token = strtok(strcmd, " ");            // split command into tokens
+    token = strtok(strsplcmd, " ");            // split command into tokens
     i = 0;
     while (token != NULL && i < 255) {
         cmd[i++] = token;
@@ -222,11 +249,28 @@ while (1) {
     }
     cmd[i] = NULL;                          // null-terminate the command array
 
+    k = 0;
+    while (cmd[k] != NULL && strcmp(cmd[k], ">>") != 0) k++;
+    if (cmd[k] != NULL) {
+        reded = 1;
+        o_k = k;
+        strfile[0] = '\0';
+        k++;
+        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
+        fflush(stdout);
+        old_out = dup(STDOUT_FILENO);
+        fd = open(strfile, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd == -1) { perror("file open error"); close(old_out); reded = 0; continue; }
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
+    }
+
 // --- COMMANDS ---
     if (strcmp(cmd[0], "q") == 0) {
         printf("Bye!\n");
         break;
-    } else if (strncmp(cmd[0], "rt", 3) == 0) {
+    } else if (strcmp(cmd[0], "rt") == 0) {
         for (i = 1; cmd[i] != NULL; i++) printf("%s ", cmd[i]);
         printf("\n");
     } else if (strcmp(cmd[0], "cd") == 0) {
@@ -246,7 +290,16 @@ while (1) {
 		if (setenv(cmd[1], cmd[2], 1) != 0) { perror("setenv"); }
 
 // --- ELSE ---
-    } else { system(history[history_count - 1]); }
-ret_if_not_fir_col(); } free(strcmd); return 0; }
+    } else {
+        pid.a = fork();
+        if (pid.a == 0) {
+            execvp(cmd[0], cmd);
+            perror("execvp failed");
+            exit(EXIT_FAILURE);
+        } else {
+            wait(NULL);
+        }
+    }
+if (reded) { fflush(stdout); dup2(old_out, STDOUT_FILENO); close(old_out); } ret_if_not_fir_col(); j++; } } free(strcmd); return 0; }
 
 // ==================== MAIN =============================================================================
