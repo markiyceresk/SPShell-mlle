@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <time.h>
+#include <sys/wait.h>
 
 #ifdef _WIN32                                                                                                                                                   // if it's slopos, show error
     #error "WOOP!!! WOOP!!! Microslop detected! This software is for Unix-based systems only. You must install Linux NOW!!! https://www.linux.org/pages/download/ !!!"          // ^ It's fully true
