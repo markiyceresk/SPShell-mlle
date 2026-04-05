@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <time.h>
 
 #ifdef _WIN32                                                                                                                                                   // if it's slopos, show error
     #error "WOOP!!! WOOP!!! Microslop detected! This software is for Unix-based systems only. You must install Linux NOW!!! https://www.linux.org/pages/download/ !!!"          // ^ It's fully true
@@ -206,7 +207,7 @@ greeting();
 FILE *file;
 char *strcmd, *token, *strsplcmd, *elsecmd, strfile[256];
 char *cmd[255], *splcmd[255];
-int i, j, k, o_k, reded, old_out, fd;
+int i, j, k, o_k, o_i, reded, reded2, merged, old_out, old_out2, fd;
 while (1) {
 
     // get command
@@ -232,10 +233,11 @@ while (1) {
 
     j = 0;
     i = 0;
-    reded = 0;
 
     while (splcmd[j] != NULL) {
-        reded = 0;
+    reded = 0;
+    merged = 0;
+    reded2 = 0;
 
     strsplcmd = splcmd[j];
     elsecmd = strdup(strsplcmd);
@@ -247,13 +249,55 @@ while (1) {
         cmd[i++] = token;
         token = strtok(NULL, " ");
     }
-    cmd[i] = NULL;                          // null-terminate the command array
+    cmd[i] = NULL;                             // null-terminate the command array
 
-    k = 0;
-    while (cmd[k] != NULL && strcmp(cmd[k], ">>") != 0) k++;
-    if (cmd[k] != NULL) {
+    // if it's " or ', make it one token
+    for (i = 0; cmd[i] != NULL; i++) {
+        if (cmd[i][0] == '"' || cmd[i][0] == '\'') {
+            if (strcmp(cmd[i], "\">>\"") == 0) { cmd[i] = ">> \b"; continue; }
+            else if (strcmp(cmd[i], "\">\"") == 0) { cmd[i] = "> \b"; continue; }
+            else if (strcmp(cmd[i], "\"2>>\"") == 0) { cmd[i] = "2>> \b"; continue; }
+            else if (strcmp(cmd[i], "\"2>\"") == 0) { cmd[i] = "2> \b"; continue; }
+            else if (strcmp(cmd[i], "\'>>\'") == 0) { cmd[i] = ">> \b"; continue; }
+            else if (strcmp(cmd[i], "\'>\'") == 0) { cmd[i] = "> \b"; continue; }
+            else if (strcmp(cmd[i], "\'2>>\'") == 0) { cmd[i] = "2>> \b"; continue; }
+            else if (strcmp(cmd[i], "\'2>\'") == 0) { cmd[i] = "2> \b"; continue; }
+            o_i = i;
+            char quote = cmd[i][0];
+            char an_tok[256] = {0};
+            strcat(an_tok, cmd[i] + 1);
+            while (cmd[i] != NULL && cmd[i][strlen(cmd[i]) - 1] != quote) {
+                strcat(an_tok, " ");
+                if (cmd[i + 1] == NULL) break;
+                strcat(an_tok, cmd[i + 1]);
+                cmd[i] = NULL;
+                merged = 1;
+                i++;
+            }
+            an_tok[strlen(an_tok) - 1] = '\0';
+            cmd[o_i] = strdup(an_tok);
+            if (merged) {
+            for (int j = o_i + 1; cmd[j] != NULL; j++) {
+                cmd[j] = cmd[j + 1];
+            }}
+            i = o_i;
+        }
+    }
+
+    // env variable substitution
+
+    for (i = 0; cmd[i] != NULL; i++) {
+        if (strncmp(cmd[i], "$", 1) == 0) {
+            if (getenv(cmd[i] + 1) != NULL) cmd[i] = getenv(cmd[i] + 1);
+        }
+    }
+
+    o_k = k = 0;
+    new:
+    while (cmd[k] != NULL && strcmp(cmd[k], ">>") != 0 && strcmp(cmd[k], ">") != 0) k++;
+    if (cmd[k] == NULL) {
+    } else if (strcmp(cmd[k], ">>") == 0) {
         reded = 1;
-        o_k = k;
         strfile[0] = '\0';
         k++;
         while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
@@ -264,12 +308,61 @@ while (1) {
         dup2(fd, STDOUT_FILENO);
         close(fd);
         while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
+    } else if (strcmp(cmd[k], ">") == 0) {
+        reded = 1;
+        strfile[0] = '\0';
+        k++;
+        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
+        fflush(stdout);
+        old_out = dup(STDOUT_FILENO);
+        fd = open(strfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd == -1) { perror("file open error"); close(old_out); reded = 0; continue; }
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
+    } else if (strcmp(cmd[k], "2>>") == 0) {
+        reded2 = 1;
+        strfile[0] = '\0';
+        k++;
+        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
+        fflush(stderr);
+        old_out2 = dup(STDERR_FILENO);
+        fd = open(strfile, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd == -1) { perror("file open error"); close(old_out2); reded2 = 0; continue; }
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
+    } else if (strcmp(cmd[k], "2>") == 0) {
+        reded2 = 1;
+        strfile[0] = '\0';
+        k++;
+        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
+        fflush(stderr);
+        old_out2 = dup(STDERR_FILENO);
+        fd = open(strfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd == -1) { perror("file open error"); close(old_out2); reded2 = 0; continue; }
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
     }
 
 // --- COMMANDS ---
-    if (strcmp(cmd[0], "q") == 0) {
+    if (strcmp(cmd[0], "q") == 0 || strcmp(cmd[0], "quit") == 0 || strcmp(cmd[0], "exit") == 0) {
         printf("Bye!\n");
-        break;
+        return 0;
+    } else if (strcmp(cmd[0], "self-comp") == 0) {
+        printf("Compiling myself...\n");
+        pid.a = fork();
+        if (pid.a == 0) {
+            execl("/usr/bin/gcc", "gcc", "-o", "vos", "vos.c", NULL);
+            perror("execl failed");
+            exit(EXIT_FAILURE);
+        } else {
+            wait(NULL);
+            printf("Done!\n");
+            execvp("./vos.bin", (char *[]){"./vos.bin", NULL});
+            perror("execvp failed");
+        }
     } else if (strcmp(cmd[0], "rt") == 0) {
         for (i = 1; cmd[i] != NULL; i++) printf("%s ", cmd[i]);
         printf("\n");
@@ -279,6 +372,7 @@ while (1) {
         printf("\033[H\033[J");
 			// mkdir
 	} else if (strcmp(cmd[0], "md") == 0) {
+        cmd[0] = "mkdir";
 		pid.a = fork();
 		if (pid.a == 0) {
 			execvp(cmd[0], cmd);
@@ -289,17 +383,114 @@ while (1) {
 	} else if (strcmp(cmd[0], "export") == 0 || strcmp(cmd[0], "ex") == 0) {
 		if (setenv(cmd[1], cmd[2], 1) != 0) { perror("setenv"); }
 
+// ----- GAMES -----
+
+	// command rps (rock paper scissors)
+	} else if (strcmp(cmd[0], "rps") == 0) {
+		struct choose {
+			short player;
+			short computer;
+			int score;
+		} choose;
+        choose.score = 0;
+		struct termios t;
+		char b;
+		tcgetattr(0, &t);
+    	struct termios n = t;
+		n.c_lflag &= ~(ICANON | ECHO);
+		tcsetattr(0, TCSANOW, &n);
+		srand(time(0));
+		while (printf("1. Rock\n2. Paper\n3. Scissors\n4. Quit\n") && read(0, &choose.player, 1) && choose.player != '4') {
+			choose.player -= '0';
+			choose.computer = rand() % 3 + 1;
+			printf("\nComputer: ");
+			if (choose.computer == 1) { printf("rock"); }
+			else if (choose.computer == 2) { printf("paper"); }
+			else if (choose.computer == 3) { printf("scissors"); }
+			printf(" | ");
+			if (choose.player == choose.computer) printf("Draw");
+			else if ((choose.player % 3) + 1 == choose.computer) { printf("You lost"); choose.score--; }
+			else { printf("You won"); choose.score++; }
+			printf(" | Score: %d\n\n", choose.score);
+		}
+		tcsetattr(0, TCSANOW, &t);
+
+			// ---- JUST FUNNY :) -----
+
+			// command news
+	} else if (strcmp(cmd[0], "news") == 0) {
+		srand(time(NULL));
+		int rnew = rand() % 10;
+		switch (rnew) {
+			case 0:
+				printf("Wheatley says, he isn't a moron! Everyone is laughing, but GLaDOS is potato.");
+				break;
+			case 1:
+				printf("Microslop (didn't) make windows open source!!!!!!!!!");
+				break;
+			case 2:
+				printf("I use Arch BTW");
+				break;
+			case 3:
+				printf("Vladimir Putin says, internet is drugs!");
+				break;
+			case 4:
+				printf("CEO of OpenAI says, vibecoding is our future! Is he right?");
+				break;
+			case 5:
+				printf("'Tomorrow's wind will blow tomorrow' - Karych");
+				break;
+			case 6:
+				printf("Scientists have taken on one of the most difficult questions in human history: Why do people dislike Viette's theorem so much?");
+				break;
+			case 7:
+				printf("When you feel stupid, remember that Windows users don't use the terminal on a daily basis.");
+				break;
+			case 8:
+				printf("Roskomnadzor has banned the letter 'A'");
+				break;
+			case 9:
+				printf("Cheese ball.");
+				break;
+		}
+
+	// command sus
+	} else if (strcmp(cmd[0], "sus") == 0) {
+		printf("This looks kinda SUS...");
+
+	// command hi
+	} else if (strcmp(cmd[0], "hi") == 0) {
+		printf("Hello!");
+
+	// command I am not a moron (reference to portal 2)
+    } else if (strcmp(cmd[0], "I") == 0 && strcmp(cmd[1], "am") == 0 && strcmp(cmd[2], "not") == 0 && strcmp(cmd[3], "a") == 0 && strcmp(cmd[4], "moron!") == 0) {
+		printf("Yes, you are!!!\n");
+		sleep(1);
+		printf("You are the moron, they built to make me an idiot!");
+
+	// command potato (reference to PWGood)
+	} else if (strcmp(cmd[0], "potato") == 0) {
+		printf("Картошка!\n");
+		sleep(1);
+		printf("картошка\nкартошка\nкартошка!");
+
 // --- ELSE ---
     } else {
         pid.a = fork();
         if (pid.a == 0) {
             execvp(cmd[0], cmd);
+            printf("\nEXEC:\n");
+            for (int x = 0; cmd[x] != NULL; x++) {
+                printf(" [%s]\n", cmd[x]);
+            }
             perror("execvp failed");
             exit(EXIT_FAILURE);
         } else {
             wait(NULL);
         }
     }
-if (reded) { fflush(stdout); dup2(old_out, STDOUT_FILENO); close(old_out); } ret_if_not_fir_col(); j++; } } free(strcmd); return 0; }
+if (reded) { fflush(stdout); dup2(old_out, STDOUT_FILENO); close(old_out); }
+if (reded2) { fflush(stderr); dup2(old_out2, STDERR_FILENO); close(old_out2); }
+ret_if_not_fir_col(); j++; } } free(strcmd); return 0; }
 
 // ==================== MAIN =============================================================================
