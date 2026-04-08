@@ -20,12 +20,8 @@
     #define PLATFORM_NAME "Unknown Unix"                // ^ define platform name
 #endif
 
-
 char dist[256];
 char *history[1000000];
-int history_count = 0;
-
-
 
 struct user {
     char name[256];
@@ -39,7 +35,13 @@ struct pid {
     pid_t d;
 } pid;
 
+struct cmd {
+    char source[255];
+    char *tokens[256];
+    char *sub[256];
+} cmd;
 
+int history_count = 0;
 
 // GET CHAR FROM INPUT
 int getch(void) {
@@ -141,6 +143,90 @@ char *getcmd(void) {
             cmd[pos++] = ch;                                                                                        // ^ insert the char in cmd and move position right
 }}}
 
+// PARSING
+
+void parse_command() {
+    char quote;
+    char buffer[255];
+    size_t len = 0;
+    buffer[0] = '\0';
+    int i, t = 0;
+    for (i = 0; cmd.source[i] != '\0'; i++) {
+        len = strlen(buffer);
+        if (cmd.source[i] != '\0' && cmd.source[i] != ' ' && cmd.source[i] != '\t' &&
+                    cmd.source[i] != '>' && cmd.source[i] != '<' && !(cmd.source[i] == '2' &&
+                    cmd.source[i+1] == '>') && cmd.source[i] != ';' && cmd.source[i] != '$') {
+            if (cmd.source[i] == '\"' || cmd.source[i] == '\'') {
+                quote = cmd.source[i];
+                i++;
+                while (cmd.source[i] != '\0' && cmd.source[i] != quote) {
+                    buffer[len] = cmd.source[i];
+                    i++; len++;
+                }
+                buffer[len] = '\0';
+            } else { buffer[len] = cmd.source[i]; buffer[len + 1] = '\0'; len++; }
+
+        } else if (cmd.source[i] == ' ' || cmd.source[i] == '\t') {
+            if (buffer[0] != '\0') {
+                cmd.tokens[t++] = strdup(buffer);
+                buffer[0] = '\0';
+            }
+        } else if (cmd.source[i] == '>') {
+            if (buffer[0] != '\0') {
+                cmd.tokens[t++] = strdup(buffer);
+                buffer[0] = '\0';
+            }
+            if (cmd.source[i+1] && cmd.source[i+1] == '>') {
+                cmd.tokens[t++] = ">>";
+                i++;
+            } else {
+                cmd.tokens[t++] = ">";
+            }
+        } else if (cmd.source[i] == '<') {
+            if (buffer[0] != '\0') {
+                cmd.tokens[t++] = strdup(buffer);
+                buffer[0] = '\0';
+            }
+            cmd.tokens[t++] = "<";
+        } else if (cmd.source[i] == '2' && cmd.source[i+1] && cmd.source[i+1] == '>') {
+            if (buffer[0] != '\0') {
+                cmd.tokens[t++] = strdup(buffer);
+                buffer[0] = '\0';
+            }
+            if (cmd.source[i+2] && cmd.source[i+2] == '>') {
+                cmd.tokens[t++] = "2>>";
+                i += 2;
+            } else {
+                cmd.tokens[t++] = "2>";
+                i++;
+            }
+        } else if (cmd.source[i] == ';') {
+            if (buffer[0] != '\0') {
+                cmd.tokens[t++] = strdup(buffer);
+                buffer[0] = '\0';
+            }
+            cmd.tokens[t++] = ";";
+        } else if (cmd.source[i] == '$') {
+            char varname[256] = {0};
+            int varlen = 0;
+            i++;
+            while (cmd.source[i] && ((cmd.source[i] >= 'a' && cmd.source[i] <= 'z') ||
+                        (cmd.source[i] >= 'A' && cmd.source[i] <= 'Z') || cmd.source[i] == '_')) {
+                varname[varlen++] = cmd.source[i];
+                i++;
+            }
+            varname[varlen] = '\0';
+            i--;  // важно
+            char *val = getenv(varname);
+            strcat(buffer, val);
+        }
+}
+if (buffer[0] != '\0') {
+    cmd.tokens[t++] = strdup(buffer);
+}
+cmd.tokens[t] = NULL;
+}
+
 // GET USER INFO
 void getuser() {
     if (PLATFORM_NAME[0] == 'U') {                                                                                  // if it's an unknown Unix, just say it's a unknown user in unknown directory
@@ -203,159 +289,86 @@ void greeting() {
 
 // ==================== MAIN =============================================================================
 
-int main() {
+int main(void) {
+
+int c, i, k, o_k;
+int reded, merged, old_in, old_out, old_out2, fd;
+
 greeting();
-FILE *file;
-char *strcmd, *token, *strsplcmd, *elsecmd, strfile[256];
-char *cmd[255], *splcmd[255];
-int i, j, k, o_k, o_i, reded, reded2, merged, old_out, old_out2, fd;
 while (1) {
 
-    // get command
-    strcmd = getcmd();                // get command with greeting
-    if (strcmd == NULL) continue;     // if it's empty, ask for command again
-    history[history_count++] = strdup(strcmd);      // save command in history
+    //getting command
+    strcpy(cmd.source, getcmd());                           // get command
+    history[history_count++] = strdup(cmd.source);          // add command to history
+    parse_command();                                        // parsing
 
-    // ------------------------------
-    // split command into subcommands
-    // ------------------------------
+    c = 0;                                  // c it's current string number
 
-    token = strtok(strcmd, ";");
+    // for command lenght
+    while (cmd.tokens[c] != NULL) {         // while isn't null
+
+    // split in ";"
     i = 0;
-    while (token != NULL && i < 255) {
-        splcmd[i++] = token;
-        token = strtok(NULL, ";");
+    while (cmd.tokens[c] != NULL && strcmp(cmd.tokens[c], ";") != 0) {      // write tokens to subcommand variable
+        cmd.sub[i++] = cmd.tokens[c++];                                     // ^ write
     }
-    splcmd[i] = NULL;                       // null-terminate the command array
+    cmd.sub[i] = NULL;                                                      // last token is NULL
 
-    // -------------------
-    // execute subcommands
-    // -------------------
+    // bypass ";"
+    if (cmd.tokens[c] != NULL && strcmp(cmd.tokens[c], ";") == 0) {
+        c++;
+    }
 
-    j = 0;
-    i = 0;
+        // if command is clear
+    if (cmd.sub[0] == NULL) continue; 
 
-    while (splcmd[j] != NULL) {
+    // --- out ---
+
     reded = 0;
-    merged = 0;
-    reded2 = 0;
-
-    strsplcmd = splcmd[j];
-    elsecmd = strdup(strsplcmd);
-
-    // split command into tokens
-    token = strtok(strsplcmd, " ");            // split command into tokens
-    i = 0;
-    while (token != NULL && i < 255) {
-        cmd[i++] = token;
-        token = strtok(NULL, " ");
-    }
-    cmd[i] = NULL;                             // null-terminate the command array
-
-    // if it's " or ', make it one token
-    for (i = 0; cmd[i] != NULL; i++) {
-        if (cmd[i][0] == '"' || cmd[i][0] == '\'') {
-            if (strcmp(cmd[i], "\">>\"") == 0) { cmd[i] = ">> \b"; continue; }
-            else if (strcmp(cmd[i], "\">\"") == 0) { cmd[i] = "> \b"; continue; }
-            else if (strcmp(cmd[i], "\"2>>\"") == 0) { cmd[i] = "2>> \b"; continue; }
-            else if (strcmp(cmd[i], "\"2>\"") == 0) { cmd[i] = "2> \b"; continue; }
-            else if (strcmp(cmd[i], "\'>>\'") == 0) { cmd[i] = ">> \b"; continue; }
-            else if (strcmp(cmd[i], "\'>\'") == 0) { cmd[i] = "> \b"; continue; }
-            else if (strcmp(cmd[i], "\'2>>\'") == 0) { cmd[i] = "2>> \b"; continue; }
-            else if (strcmp(cmd[i], "\'2>\'") == 0) { cmd[i] = "2> \b"; continue; }
-            o_i = i;
-            char quote = cmd[i][0];
-            char an_tok[256] = {0};
-            strcat(an_tok, cmd[i] + 1);
-            while (cmd[i] != NULL && cmd[i][strlen(cmd[i]) - 1] != quote) {
-                strcat(an_tok, " ");
-                if (cmd[i + 1] == NULL) break;
-                strcat(an_tok, cmd[i + 1]);
-                cmd[i] = NULL;
-                merged = 1;
-                i++;
-            }
-            an_tok[strlen(an_tok) - 1] = '\0';
-            cmd[o_i] = strdup(an_tok);
-            if (merged) {
-            for (int j = o_i + 1; cmd[j] != NULL; j++) {
-                cmd[j] = cmd[j + 1];
-            }}
-            i = o_i;
-        }
-    }
-
-    // env variable substitution
-
-    for (i = 0; cmd[i] != NULL; i++) {
-        if (strncmp(cmd[i], "$", 1) == 0) {
-            if (getenv(cmd[i] + 1) != NULL) cmd[i] = getenv(cmd[i] + 1);
-        }
-    }
-
-    o_k = k = 0;
-    new:
-    while (cmd[k] != NULL && strcmp(cmd[k], ">>") != 0 && strcmp(cmd[k], ">") != 0) k++;
-    if (cmd[k] == NULL) {
-    } else if (strcmp(cmd[k], ">>") == 0) {
+    k = 0;
+    while (cmd.sub[k] != NULL && strcmp(cmd.sub[k], ">>") != 0 && strcmp(cmd.sub[k], ">") != 0 &&
+                strcmp(cmd.sub[k], "2>>") != 0 && strcmp(cmd.sub[k], "2>") != 0 && strcmp(cmd.sub[k], "<") != 0) k++;
+    if (cmd.sub[k]) {
+        o_k = k;
         reded = 1;
-        strfile[0] = '\0';
         k++;
-        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
-        fflush(stdout);
+        if (cmd.sub[k] == NULL) {
+            fprintf(stderr, "syntax error: no file name\n");
+            continue; 
+        }
+        old_in = dup(STDIN_FILENO);
         old_out = dup(STDOUT_FILENO);
-        fd = open(strfile, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd == -1) { perror("file open error"); close(old_out); reded = 0; continue; }
-        dup2(fd, STDOUT_FILENO);
-        close(fd);
-        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
-    } else if (strcmp(cmd[k], ">") == 0) {
-        reded = 1;
-        strfile[0] = '\0';
-        k++;
-        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
+        old_out2 = dup(STDERR_FILENO);
         fflush(stdout);
-        old_out = dup(STDOUT_FILENO);
-        fd = open(strfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd == -1) { perror("file open error"); close(old_out); reded = 0; continue; }
-        dup2(fd, STDOUT_FILENO);
-        close(fd);
-        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
-    } else if (strcmp(cmd[k], "2>>") == 0) {
-        reded2 = 1;
-        strfile[0] = '\0';
-        k++;
-        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
         fflush(stderr);
-        old_out2 = dup(STDERR_FILENO);
-        fd = open(strfile, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd == -1) { perror("file open error"); close(old_out2); reded2 = 0; continue; }
-        dup2(fd, STDERR_FILENO);
+        char *filename = cmd.sub[k];
+        k--;
+        if (strcmp(cmd.sub[k], "<") == 0) {
+            fd = open(filename, O_RDONLY, 0644);
+            if (fd == -1) { perror("input open error"); reded = 0; continue; }
+            dup2(fd, STDIN_FILENO);
+        } else {
+            if (strcmp(cmd.sub[k], ">>") == 0 || strcmp(cmd.sub[k], "2>>") == 0) fd = open(filename, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            else if (strcmp(cmd.sub[k], ">") == 0 || strcmp(cmd.sub[k], "2>") == 0) fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd == -1) { perror("file open error"); close(old_out); close(old_out2); reded = 0; continue; }
+            if (strcmp(cmd.sub[k], ">>") == 0 || strcmp(cmd.sub[k], ">") == 0) dup2(fd, STDOUT_FILENO);
+            else if (strcmp(cmd.sub[k], "2>>") == 0 || strcmp(cmd.sub[k], "2>") == 0) dup2(fd, STDERR_FILENO);
+        }
         close(fd);
-        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
-    } else if (strcmp(cmd[k], "2>") == 0) {
-        reded2 = 1;
-        strfile[0] = '\0';
-        k++;
-        while (cmd[k] != NULL) { strcat(strfile, cmd[k]); k++; }
-        fflush(stderr);
-        old_out2 = dup(STDERR_FILENO);
-        fd = open(strfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd == -1) { perror("file open error"); close(old_out2); reded2 = 0; continue; }
-        dup2(fd, STDERR_FILENO);
-        close(fd);
-        while (cmd[o_k] != NULL) { cmd[o_k] = NULL; o_k++; }
+        cmd.sub[k] = NULL;
     }
 
-// --- COMMANDS ---
-    if (strcmp(cmd[0], "q") == 0 || strcmp(cmd[0], "quit") == 0 || strcmp(cmd[0], "exit") == 0) {
-        printf("Bye!\n");
-        return 0;
-    } else if (strcmp(cmd[0], "self-comp") == 0) {
+    // --- out ---
+
+        // quit
+    if (strcmp(cmd.sub[0], "q") == 0 || strcmp(cmd.sub[0], "quit") == 0 || strcmp(cmd.sub[0], "exit") == 0) { printf("Bye!\n"); return 0; }
+
+        // self-compile
+    else if (strcmp(cmd.sub[0], "sc") == 0) {
         printf("Compiling myself...\n");
         pid.a = fork();
         if (pid.a == 0) {
-            execl("/usr/bin/gcc", "gcc", "-o", "vos", "vos.c", NULL);
+            execl("/usr/bin/gcc", "gcc", "-o", "vos.c", "vos.bin", NULL);
             perror("execl failed");
             exit(EXIT_FAILURE);
         } else {
@@ -364,30 +377,38 @@ while (1) {
             execvp("./vos.bin", (char *[]){"./vos.bin", NULL});
             perror("execvp failed");
         }
-    } else if (strcmp(cmd[0], "rt") == 0) {
-        for (i = 1; cmd[i] != NULL; i++) printf("%s ", cmd[i]);
-        printf("\n");
-    } else if (strcmp(cmd[0], "cd") == 0) {
-        if (cmd[1] == NULL) { chdir(user.dir); } else { chdir(cmd[1]); }
-    } else if (strcmp(cmd[0], "clear") == 0 || strcmp(cmd[0], "cls") == 0) {
+
+        // command cd
+    } else if (strcmp(cmd.sub[0], "cd") == 0) {
+        if (cmd.sub[1] == NULL) { chdir(user.dir); } else { chdir(cmd.sub[1]); }
+
+        // command clear (cls for slop os users)
+    } else if (strcmp(cmd.sub[0], "clear") == 0 || strcmp(cmd.sub[0], "cls") == 0) {
         printf("\033[H\033[J");
-			// mkdir
-	} else if (strcmp(cmd[0], "md") == 0) {
-        cmd[0] = "mkdir";
+
+        // command export
+	} else if (strcmp(cmd.sub[0], "export") == 0 || strcmp(cmd.sub[0], "ex") == 0) {
+		if (setenv(cmd.sub[1], cmd.sub[2], 1) != 0) { perror("setenv"); }
+    
+        // get logo
+    } else if (strcmp(cmd.sub[0], "getlogo") == 0) {
+        getlogo();
+
+        // simle mkdir
+	} else if (strcmp(cmd.sub[0], "md") == 0) {
+        cmd.sub[0] = "mkdir";
 		pid.a = fork();
 		if (pid.a == 0) {
-			execvp(cmd[0], cmd);
+			execvp(cmd.sub[0], cmd.sub);
 			perror("execvp failed");
 		} else {
 			wait(NULL);
 		}
-	} else if (strcmp(cmd[0], "export") == 0 || strcmp(cmd[0], "ex") == 0) {
-		if (setenv(cmd[1], cmd[2], 1) != 0) { perror("setenv"); }
 
 // ----- GAMES -----
 
 	// command rps (rock paper scissors)
-	} else if (strcmp(cmd[0], "rps") == 0) {
+	} else if (strcmp(cmd.sub[0], "rps") == 0) {
 		struct choose {
 			short player;
 			short computer;
@@ -419,7 +440,7 @@ while (1) {
 			// ---- JUST FUNNY :) -----
 
 			// command news
-	} else if (strcmp(cmd[0], "news") == 0) {
+	} else if (strcmp(cmd.sub[0], "news") == 0) {
 		srand(time(NULL));
 		int rnew = rand() % 10;
 		switch (rnew) {
@@ -456,42 +477,38 @@ while (1) {
 		}
 
 	// command sus
-	} else if (strcmp(cmd[0], "sus") == 0) {
+	} else if (strcmp(cmd.sub[0], "sus") == 0) {
 		printf("This looks kinda SUS...");
 
 	// command hi
-	} else if (strcmp(cmd[0], "hi") == 0) {
+	} else if (strcmp(cmd.sub[0], "hi") == 0) {
 		printf("Hello!");
 
 	// command I am not a moron (reference to portal 2)
-    } else if (strcmp(cmd[0], "I") == 0 && strcmp(cmd[1], "am") == 0 && strcmp(cmd[2], "not") == 0 && strcmp(cmd[3], "a") == 0 && strcmp(cmd[4], "moron!") == 0) {
+    } else if (strcmp(cmd.sub[0], "I am not a moron!") == 0) {
 		printf("Yes, you are!!!\n");
 		sleep(1);
 		printf("You are the moron, they built to make me an idiot!");
 
 	// command potato (reference to PWGood)
-	} else if (strcmp(cmd[0], "potato") == 0) {
+	} else if (strcmp(cmd.sub[0], "potato") == 0) {
 		printf("Картошка!\n");
 		sleep(1);
 		printf("картошка\nкартошка\nкартошка!");
 
-// --- ELSE ---
     } else {
         pid.a = fork();
         if (pid.a == 0) {
-            execvp(cmd[0], cmd);
-            printf("\nEXEC:\n");
-            for (int x = 0; cmd[x] != NULL; x++) {
-                printf(" [%s]\n", cmd[x]);
-            }
-            perror("execvp failed");
-            exit(EXIT_FAILURE);
+            execvp(cmd.sub[0], cmd.sub);
+            perror("shell");
         } else {
             wait(NULL);
         }
-    }
-if (reded) { fflush(stdout); dup2(old_out, STDOUT_FILENO); close(old_out); }
-if (reded2) { fflush(stderr); dup2(old_out2, STDERR_FILENO); close(old_out2); }
-ret_if_not_fir_col(); j++; } } free(strcmd); return 0; }
 
-// ==================== MAIN =============================================================================
+    }
+
+if (reded) { fflush(stdout); dup2(old_out, STDOUT_FILENO); close(old_out); fflush(stderr); dup2(old_out2, STDERR_FILENO); close(old_out2); fflush(stdin); dup2(old_in, STDIN_FILENO); close(old_in); }
+
+ret_if_not_fir_col();
+
+}}}
